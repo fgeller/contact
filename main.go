@@ -26,8 +26,9 @@ func newServer(cfg *Config) *server {
 		addr: cfg.Addr,
 		mux:  http.NewServeMux(),
 		mailConfig: &mailConfig{
-			To:   cfg.Email.From,
-			From: cfg.Email.From,
+			To:      cfg.Email.From,
+			From:    cfg.Email.From,
+			Subject: cfg.Email.Subject,
 			SMTP: smtpConfig{
 				Host: cfg.Email.SMTP.Host,
 				Port: cfg.Email.SMTP.Port,
@@ -181,8 +182,9 @@ type Config struct {
 }
 
 type ConfigEmail struct {
-	From string     `yaml:"from"`
-	SMTP ConfigSMTP `yaml:"smtp"`
+	From    string     `yaml:"from"`
+	Subject string     `yaml:"subject"`
+	SMTP    ConfigSMTP `yaml:"smtp"`
 }
 
 type ConfigSMTP struct {
@@ -211,6 +213,10 @@ func readConfig(fp string) (*Config, error) {
 
 	if cf.Email.From == "" {
 		return nil, fmt.Errorf("config is missing email.from")
+	}
+
+	if cf.Email.Subject == "" {
+		return nil, fmt.Errorf("config is missing email.subject")
 	}
 
 	if cf.Email.SMTP.Host == "" {
