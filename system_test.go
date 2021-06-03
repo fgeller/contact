@@ -97,6 +97,7 @@ func build(t *testing.T) {
 
 type TestSMTPBackend struct {
 	user, pass string
+	sessions   chan *TestSMTPSession
 }
 type TestSMTPSession struct {
 	lastData string
@@ -106,7 +107,9 @@ func (b *TestSMTPBackend) Login(state *smtp.ConnectionState, username, password 
 	if username != b.user || password != b.pass {
 		return nil, errors.New("Invalid username or password")
 	}
-	return &TestSMTPSession{}, nil
+	s := &TestSMTPSession{}
+	b.sessions <- s
+	return s, nil
 }
 
 func (b *TestSMTPBackend) AnonymousLogin(state *smtp.ConnectionState) (smtp.Session, error) {
@@ -139,8 +142,12 @@ func (s *TestSMTPSession) Logout() error {
 	return nil
 }
 
-func startSMTPServer(t *testing.T) {
-	sb := &TestSMTPBackend{user: "test", pass: "abc123"}
+func startSMTPServer(t *testing.T) *TestSMTPBackend {
+	sb := &TestSMTPBackend{
+		user:     "test",
+		pass:     "abc123",
+		sessions: make(chan *TestSMTPSession, 1),
+	}
 	s := smtp.NewServer(sb)
 	s.Addr = ":1025"
 	s.Domain = "localhost"
@@ -157,6 +164,8 @@ func startSMTPServer(t *testing.T) {
 			log.Printf("Test SMTP server failed err=%v\n", err)
 		}
 	}()
+
+	return sb
 }
 
 func submitTestForm(url, name, email, message string) (*http.Response, error) {
@@ -169,22 +178,26 @@ func submitTestForm(url, name, email, message string) (*http.Response, error) {
 
 func TestSystem(t *testing.T) {
 	build(t)
-	startSMTPServer(t)
+	sb := startSMTPServer(t)
 
 	var err error
 
-	//
-	// contact -config test-data/test-cfg.yml
-	//
-	err = newCmd().
-		runAsync("./contact",
-			"-config", "test-data/test-cfg.yml",
-		)
+	cmd := newCmd()
+	err = cmd.runAsync("./contact", "-config", "test-data/test-cfg.yml")
 	require.Nil(t, err)
-	time.Sleep(time.Second)
-	resp, err := submitTestForm("http://localhost:5151/mail", "hans", "hans@example.org", "hello there, system test!")
+	time.Sleep(100 * time.Millisecond)
+
+	testName, testEmail := "hans", "hans@example.org"
+	testMessage := "hello there, system test!"
+	resp, err := submitTestForm("http://localhost:5151/mail", testName, testEmail, testMessage)
 	require.Nil(t, err)
 	require.Equal(t, resp.StatusCode, 200)
-	// TODO let's not sleep :P
-	time.Sleep(5 * time.Second)
+
+	log.Print("waiting for sessions to be available")
+	ts := <-sb.sessions
+
+	require.Contains(t, ts.lastData, fmt.Sprintf("Name: %v", testName))
+	require.Contains(t, ts.lastData, fmt.Sprintf("Email: %v", testEmail))
+	require.Contains(t, ts.lastData, testMessage)
+
 }
