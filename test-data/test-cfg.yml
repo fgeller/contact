@@ -1,0 +1,8 @@
+addr: 0.0.0.0:5151
+email: 
+    from: "test@example.com"
+    smtp:
+        user: test
+        pass: abc123
+        host: localhost
+        port: 1025
