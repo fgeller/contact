@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	htmlTemplate "html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
+	"text/template"
 	"time"
 
 	"gopkg.in/gomail.v2"
@@ -26,9 +29,10 @@ func newServer(cfg *Config) *server {
 		addr: cfg.Addr,
 		mux:  http.NewServeMux(),
 		mailConfig: &mailConfig{
-			To:      cfg.Email.From,
-			From:    cfg.Email.From,
-			Subject: cfg.Email.Subject,
+			To:              cfg.Email.From,
+			From:            cfg.Email.From,
+			SubjectTemplate: cfg.Email.templateSubject,
+			MessageTemplate: cfg.Email.templateMessage,
 			SMTP: smtpConfig{
 				Host: cfg.Email.SMTP.Host,
 				Port: cfg.Email.SMTP.Port,
@@ -57,17 +61,28 @@ func (s *server) start() error {
 }
 
 type mailReq struct {
-	name    string
-	email   string
-	message string
+	Name    string
+	Email   string
+	Message string
 }
 
-func (r *mailReq) makeEmailBody() string {
-	return fmt.Sprintf(`Name: %v
-Email: %v
-Message:
-%v
-`, r.name, r.email, r.message)
+func (r *mailReq) makeMessage(t *htmlTemplate.Template) (string, error) {
+	var buf bytes.Buffer
+	err := t.Execute(&buf, r)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute message template err=%w", err)
+	}
+
+	return buf.String(), nil
+}
+
+func (r *mailReq) makeSubject(t *template.Template) (string, error) {
+	var buf bytes.Buffer
+	err := t.Execute(&buf, r)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute subject template err=%w", err)
+	}
+	return buf.String(), nil
 }
 
 func (s *server) handleMailRequest(w http.ResponseWriter, r *http.Request) {
@@ -78,19 +93,26 @@ func (s *server) handleMailRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mr := &mailReq{
-		name:    r.Form.Get("name"),
-		email:   r.Form.Get("email"),
-		message: r.Form.Get("message"),
+		Name:    r.Form.Get("name"),
+		Email:   r.Form.Get("email"),
+		Message: r.Form.Get("message"),
 	}
-	sendMail(s.mailConfig, mr)
+	err = sendMail(s.mailConfig, mr)
+	if err != nil {
+		log.Printf("failed to send mail err=%v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	log.Printf("handled mail request to %#v", s.mailConfig.To)
 }
 
 type mailConfig struct {
-	From    string
-	To      string
-	Subject string
-	SMTP    smtpConfig
+	From            string
+	To              string
+	SubjectTemplate *template.Template
+	MessageTemplate *htmlTemplate.Template
+	SMTP            smtpConfig
 }
 
 type smtpConfig struct {
@@ -101,11 +123,21 @@ type smtpConfig struct {
 }
 
 func sendMail(mc *mailConfig, mr *mailReq) error {
+	subject, err := mr.makeSubject(mc.SubjectTemplate)
+	if err != nil {
+		return err
+	}
+
+	message, err := mr.makeMessage(mc.MessageTemplate)
+	if err != nil {
+		return err
+	}
+
 	m := gomail.NewMessage()
 	m.SetHeader("From", mc.From)
 	m.SetHeader("To", mc.From)
-	m.SetHeader("Subject", mc.Subject)
-	m.SetBody("text/html", mr.makeEmailBody())
+	m.SetHeader("Subject", subject)
+	m.SetBody("text/html", message)
 
 	d := gomail.NewDialer(mc.SMTP.Host, mc.SMTP.Port, mc.SMTP.User, mc.SMTP.Pass)
 	return d.DialAndSend(m)
@@ -182,9 +214,13 @@ type Config struct {
 }
 
 type ConfigEmail struct {
-	From    string     `yaml:"from"`
-	Subject string     `yaml:"subject"`
-	SMTP    ConfigSMTP `yaml:"smtp"`
+	From            string     `yaml:"from"`
+	SubjectTemplate string     `yaml:"subject-template"`
+	MessageTemplate string     `yaml:"message-template"`
+	SMTP            ConfigSMTP `yaml:"smtp"`
+
+	templateSubject *template.Template
+	templateMessage *htmlTemplate.Template
 }
 
 type ConfigSMTP struct {
@@ -215,8 +251,21 @@ func readConfig(fp string) (*Config, error) {
 		return nil, fmt.Errorf("config is missing email.from")
 	}
 
-	if cf.Email.Subject == "" {
-		return nil, fmt.Errorf("config is missing email.subject")
+	if cf.Email.SubjectTemplate == "" {
+		return nil, fmt.Errorf("config is missing email.subject-template")
+	}
+
+	cf.Email.templateSubject, err = template.New("subject").Parse(cf.Email.SubjectTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse email.subject-template err=%w", err)
+	}
+
+	if cf.Email.MessageTemplate == "" {
+		return nil, fmt.Errorf("config is missing email.message-template")
+	}
+	cf.Email.templateMessage, err = htmlTemplate.New("message").Parse(cf.Email.MessageTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse email.message-template err=%w", err)
 	}
 
 	if cf.Email.SMTP.Host == "" {

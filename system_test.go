@@ -196,8 +196,8 @@ func TestSystem(t *testing.T) {
 	log.Print("waiting for sessions to be available")
 	ts := <-sb.sessions
 
+	require.Contains(t, ts.lastData, fmt.Sprintf("Subject: contact from %v", testName))
 	require.Contains(t, ts.lastData, fmt.Sprintf("Name: %v", testName))
 	require.Contains(t, ts.lastData, fmt.Sprintf("Email: %v", testEmail))
-	require.Contains(t, ts.lastData, testMessage)
-
+	require.Contains(t, ts.lastData, "hello there")
 }
