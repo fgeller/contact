@@ -168,11 +168,12 @@ func startSMTPServer(t *testing.T) *TestSMTPBackend {
 	return sb
 }
 
-func submitTestForm(url, name, email, message string) (*http.Response, error) {
+func submitTestForm(url, name, email, message, check string) (*http.Response, error) {
 	fd := purl.Values{}
 	fd.Add("name", name)
 	fd.Add("email", email)
 	fd.Add("message", message)
+	fd.Add("check", check)
 	return http.PostForm(url, fd)
 }
 
@@ -189,7 +190,14 @@ func TestSystem(t *testing.T) {
 
 	testName, testEmail := "hans", "hans@example.org"
 	testMessage := "hello there, system test!"
-	resp, err := submitTestForm("http://localhost:5151/mail", testName, testEmail, testMessage)
+	testCheck := "test!"
+	resp, err := submitTestForm(
+		"http://localhost:5151/mail",
+		testName,
+		testEmail,
+		testMessage,
+		testCheck,
+	)
 	require.Nil(t, err)
 	require.Equal(t, resp.StatusCode, 200)
 
@@ -200,4 +208,27 @@ func TestSystem(t *testing.T) {
 	require.Contains(t, ts.lastData, fmt.Sprintf("Name: %v", testName))
 	require.Contains(t, ts.lastData, fmt.Sprintf("Email: %v", testEmail))
 	require.Contains(t, ts.lastData, "hello there")
+}
+
+func TestInvalidCheck(t *testing.T) {
+	build(t)
+	var err error
+
+	cmd := newCmd()
+	err = cmd.runAsync("./contact", "-config", "test-data/test-cfg.yml")
+	require.Nil(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	testName, testEmail := "hans", "hans@example.org"
+	testMessage := "hello there, system test!"
+	testCheck := "nope"
+	resp, err := submitTestForm(
+		"http://localhost:5151/mail",
+		testName,
+		testEmail,
+		testMessage,
+		testCheck,
+	)
+	require.Nil(t, err)
+	require.Equal(t, resp.StatusCode, 400)
 }

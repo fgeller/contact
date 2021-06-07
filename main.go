@@ -64,6 +64,44 @@ type mailReq struct {
 	Name    string
 	Email   string
 	Message string
+	Check   string
+}
+
+func newMailRequest(name, email, message, check string) (*mailReq, error) {
+	if name == "" {
+		return nil, fmt.Errorf("missing required name")
+	}
+	if email == "" {
+		return nil, fmt.Errorf("missing required email")
+	}
+	if message == "" {
+		return nil, fmt.Errorf("missing required message")
+	}
+	if check == "" {
+		return nil, fmt.Errorf("missing required check")
+	}
+
+	err := validateMessage(message, check)
+	if err != nil {
+		return nil, fmt.Errorf("check failed err=%v", err)
+	}
+
+	result := &mailReq{
+		Name:    name,
+		Email:   email,
+		Message: message,
+		Check:   check,
+	}
+
+	return result, nil
+}
+
+func validateMessage(msg, check string) error {
+	sfx := msg[len(msg)-len(check):]
+	if check != sfx {
+		return fmt.Errorf("message suffix=%v does not match the given check=%#v", sfx, check)
+	}
+	return nil
 }
 
 func (r *mailReq) makeMessage(t *htmlTemplate.Template) (string, error) {
@@ -92,11 +130,19 @@ func (s *server) handleMailRequest(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	mr := &mailReq{
-		Name:    r.Form.Get("name"),
-		Email:   r.Form.Get("email"),
-		Message: r.Form.Get("message"),
+
+	mr, err := newMailRequest(
+		r.Form.Get("name"),
+		r.Form.Get("email"),
+		r.Form.Get("message"),
+		r.Form.Get("check"),
+	)
+	if err != nil {
+		log.Printf("invalid mail request err=%v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
+
 	err = sendMail(s.mailConfig, mr)
 	if err != nil {
 		log.Printf("failed to send mail err=%v", err)
