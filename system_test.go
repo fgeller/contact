@@ -20,17 +20,38 @@ import (
 )
 
 type cmd struct {
-	in string
+	cmd *exec.Cmd
+	in  string
 }
 
-func newCmd() *cmd                  { return &cmd{} }
-func (c *cmd) stdIn(in string) *cmd { c.in = in; return c }
-func (c *cmd) runAsync(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	if len(c.in) > 0 {
-		cmd.Stdin = strings.NewReader(c.in)
+func newCmd() *cmd {
+	return &cmd{}
+}
+
+func (c *cmd) stdIn(in string) *cmd {
+	c.in = in
+	return c
+}
+
+func (c *cmd) kill() {
+	err := c.cmd.Process.Kill()
+	if err != nil {
+		log.Printf(">> failed to kill command err=%v", err)
 	}
-	errPipe, err := cmd.StderrPipe()
+
+	pc, err := c.cmd.Process.Wait()
+	if err != nil {
+		log.Printf(">> failed to wait for process err=%v pc=%s", err, pc)
+	}
+}
+
+func (c *cmd) runAsync(name string, args ...string) error {
+	c.cmd = exec.Command(name, args...)
+	if len(c.in) > 0 {
+		c.cmd.Stdin = strings.NewReader(c.in)
+	}
+
+	errPipe, err := c.cmd.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stderr pipe err=%w", err)
 	}
@@ -46,7 +67,7 @@ func (c *cmd) runAsync(name string, args ...string) error {
 		}
 	}()
 
-	outPipe, err := cmd.StdoutPipe()
+	outPipe, err := c.cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe err=%w", err)
 	}
@@ -62,7 +83,7 @@ func (c *cmd) runAsync(name string, args ...string) error {
 		}
 	}()
 
-	return cmd.Start()
+	return c.cmd.Start()
 }
 
 func (c *cmd) run(name string, args ...string) (int, string, string) {
@@ -98,6 +119,7 @@ func build(t *testing.T) {
 type TestSMTPBackend struct {
 	user, pass string
 	sessions   chan *TestSMTPSession
+	server     *smtp.Server
 }
 type TestSMTPSession struct {
 	lastData string
@@ -110,6 +132,10 @@ func (b *TestSMTPBackend) Login(state *smtp.ConnectionState, username, password 
 	s := &TestSMTPSession{}
 	b.sessions <- s
 	return s, nil
+}
+
+func (b *TestSMTPBackend) Close() error {
+	return b.server.Close()
 }
 
 func (b *TestSMTPBackend) AnonymousLogin(state *smtp.ConnectionState) (smtp.Session, error) {
@@ -148,18 +174,18 @@ func startSMTPServer(t *testing.T) *TestSMTPBackend {
 		pass:     "abc123",
 		sessions: make(chan *TestSMTPSession, 1),
 	}
-	s := smtp.NewServer(sb)
-	s.Addr = ":1025"
-	s.Domain = "localhost"
-	s.ReadTimeout = 10 * time.Second
-	s.WriteTimeout = 10 * time.Second
-	s.MaxMessageBytes = 1024 * 1024
-	s.MaxRecipients = 50
-	s.AllowInsecureAuth = true
+	sb.server = smtp.NewServer(sb)
+	sb.server.Addr = ":1025"
+	sb.server.Domain = "localhost"
+	sb.server.ReadTimeout = 10 * time.Second
+	sb.server.WriteTimeout = 10 * time.Second
+	sb.server.MaxMessageBytes = 1024 * 1024
+	sb.server.MaxRecipients = 50
+	sb.server.AllowInsecureAuth = true
 
 	go func() {
 		log.Printf("starting test SMTP server\n")
-		err := s.ListenAndServe()
+		err := sb.server.ListenAndServe()
 		if err != nil {
 			log.Printf("Test SMTP server failed err=%v\n", err)
 		}
@@ -180,11 +206,13 @@ func submitTestForm(url, name, email, message, check string) (*http.Response, er
 func TestSystem(t *testing.T) {
 	build(t)
 	sb := startSMTPServer(t)
+	defer sb.Close()
 
 	var err error
 
 	cmd := newCmd()
 	err = cmd.runAsync("./contact", "-config", "test-data/test-cfg.yml")
+	defer cmd.kill()
 	require.Nil(t, err)
 	time.Sleep(100 * time.Millisecond)
 
@@ -208,6 +236,16 @@ func TestSystem(t *testing.T) {
 	require.Contains(t, ts.lastData, fmt.Sprintf("Name: %v", testName))
 	require.Contains(t, ts.lastData, fmt.Sprintf("Email: %v", testEmail))
 	require.Contains(t, ts.lastData, "hello there")
+
+	resp, err = submitTestForm(
+		"http://localhost:5151/mail",
+		testName,
+		testEmail,
+		testMessage,
+		testCheck,
+	)
+	require.Nil(t, err)
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 }
 
 func TestInvalidCheck(t *testing.T) {
@@ -216,6 +254,7 @@ func TestInvalidCheck(t *testing.T) {
 
 	cmd := newCmd()
 	err = cmd.runAsync("./contact", "-config", "test-data/test-cfg.yml")
+	defer cmd.kill()
 	require.Nil(t, err)
 	time.Sleep(100 * time.Millisecond)
 

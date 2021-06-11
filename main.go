@@ -21,13 +21,15 @@ import (
 type server struct {
 	addr       string
 	mux        *http.ServeMux
+	reqCache   *cache
 	mailConfig *mailConfig
 }
 
 func newServer(cfg *Config) *server {
 	return &server{
-		addr: cfg.Addr,
-		mux:  http.NewServeMux(),
+		addr:     cfg.Addr,
+		mux:      http.NewServeMux(),
+		reqCache: newCache(time.Minute, time.Second),
 		mailConfig: &mailConfig{
 			To:              cfg.Email.From,
 			From:            cfg.Email.From,
@@ -129,6 +131,14 @@ func (s *server) handleMailRequest(w http.ResponseWriter, r *http.Request) {
 		log.Printf("failed to parse form on request err=%v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
+	}
+
+	if s.reqCache.Exists(r.Form.Get("email")) {
+		log.Printf("rejecting request")
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	} else {
+		s.reqCache.Add(r.Form.Get("email"))
 	}
 
 	mr, err := newMailRequest(
