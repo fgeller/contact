@@ -25,11 +25,16 @@ type server struct {
 	mailConfig *mailConfig
 }
 
-func newServer(cfg *Config) *server {
-	return &server{
+func newServer(cfg *Config) (*server, error) {
+	c, err := newCache(cfg.RequestTimeLimit, cfg.RequestTimeLimit/10)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request cache err=%w", err)
+	}
+
+	s := &server{
 		addr:     cfg.Addr,
 		mux:      http.NewServeMux(),
-		reqCache: newCache(time.Minute, time.Second),
+		reqCache: c,
 		mailConfig: &mailConfig{
 			To:              cfg.Email.From,
 			From:            cfg.Email.From,
@@ -43,6 +48,7 @@ func newServer(cfg *Config) *server {
 			},
 		},
 	}
+	return s, nil
 }
 
 func (s *server) setupRouting() {
@@ -265,8 +271,9 @@ func fileExists(path string) bool {
 }
 
 type Config struct {
-	Addr  string      `yaml:"addr"`
-	Email ConfigEmail `yaml:"email"`
+	Addr             string        `yaml:"addr"`
+	Email            ConfigEmail   `yaml:"email"`
+	RequestTimeLimit time.Duration `yaml:"request-time-limit"`
 }
 
 type ConfigEmail struct {
@@ -380,7 +387,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to parse config err=%v\n", err)
 	}
 
-	err = newServer(cfg).start()
+	srv, err := newServer(cfg)
+	if err != nil {
+		log.Fatalf("failed to create server err=%v", err)
+	}
+
+	err = srv.start()
 	if err != nil {
 		log.Fatalf("server failed err=%v", err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -15,14 +16,21 @@ type cache struct {
 	entries map[string]int64
 }
 
-func newCache(ttl, reapIntervals time.Duration) *cache {
+func newCache(ttl, reapIntervals time.Duration) (*cache, error) {
+	if ttl <= 0 {
+		return nil, fmt.Errorf("invalid ttl=%#v", ttl)
+	}
+	if reapIntervals > ttl {
+		return nil, fmt.Errorf("reapIntervals should be less than ttl")
+	}
+
 	c := &cache{
 		TTL:           ttl,
 		ReapIntervals: reapIntervals,
 		entries:       make(map[string]int64),
 	}
 	c.startReaper()
-	return c
+	return c, nil
 }
 
 func (c *cache) startReaper() {

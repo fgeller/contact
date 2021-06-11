@@ -1,4 +1,5 @@
 addr: 0.0.0.0:5151
+request-time-limit: 1m
 email: 
     from: "test@example.com"
     subject-template: "contact from {{ .Name }}"

@@ -8,7 +8,8 @@ import (
 )
 
 func TestCacheAddSize(t *testing.T) {
-	target := newCache(time.Minute, time.Millisecond)
+	target, err := newCache(time.Minute, time.Millisecond)
+	require.Nil(t, err)
 	defer target.Destroy()
 
 	target.Add("hans")
@@ -24,7 +25,8 @@ func TestCacheAddSize(t *testing.T) {
 func TestCacheTTL(t *testing.T) {
 	ttl := 10 * time.Millisecond
 	reap := time.Millisecond
-	target := newCache(ttl, reap)
+	target, err := newCache(ttl, reap)
+	require.Nil(t, err)
 	defer target.Destroy()
 
 	target.Add("hans")
