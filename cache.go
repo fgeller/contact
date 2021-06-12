@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"time"
 )
@@ -11,12 +12,13 @@ type cache struct {
 
 	TTL           time.Duration
 	ReapIntervals time.Duration
+	MaxEntries    int
 
 	stop    bool
 	entries map[string]int64
 }
 
-func newCache(ttl, reapIntervals time.Duration) (*cache, error) {
+func newCache(ttl, reapIntervals time.Duration, maxEntries int) (*cache, error) {
 	if ttl <= 0 {
 		return nil, fmt.Errorf("invalid ttl=%#v", ttl)
 	}
@@ -27,6 +29,7 @@ func newCache(ttl, reapIntervals time.Duration) (*cache, error) {
 	c := &cache{
 		TTL:           ttl,
 		ReapIntervals: reapIntervals,
+		MaxEntries:    maxEntries,
 		entries:       make(map[string]int64),
 	}
 	c.startReaper()
@@ -61,8 +64,27 @@ func (c *cache) Destroy() {
 	c.stop = true
 }
 
+func (c *cache) Len() int {
+	var l int
+	c.RLock()
+	l = len(c.entries)
+	c.RUnlock()
+	return l
+}
+
 func (c *cache) Add(v string) {
 	c.Lock()
+	if c.MaxEntries > 0 && len(c.entries) >= c.MaxEntries {
+		oldestTS := int64(math.MaxInt64)
+		var oldestV string
+		for v, ts := range c.entries {
+			if ts < oldestTS {
+				oldestTS = ts
+				oldestV = v
+			}
+		}
+		delete(c.entries, oldestV)
+	}
 	c.entries[v] = time.Now().UnixNano()
 	c.Unlock()
 }

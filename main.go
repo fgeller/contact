@@ -26,7 +26,7 @@ type server struct {
 }
 
 func newServer(cfg *Config) (*server, error) {
-	c, err := newCache(cfg.RequestTimeLimit, cfg.RequestTimeLimit/10)
+	c, err := newCache(cfg.RequestTimeLimit, cfg.RequestTimeLimit/10, 10)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request cache err=%w", err)
 	}
