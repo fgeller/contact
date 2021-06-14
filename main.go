@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	htmlTemplate "html/template"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -294,7 +293,7 @@ type ConfigSMTP struct {
 }
 
 func readConfig(fp string) (*Config, error) {
-	bt, err := ioutil.ReadFile(fp)
+	bt, err := os.ReadFile(fp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}

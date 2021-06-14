@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	purl "net/url"
@@ -153,7 +152,7 @@ func (s *TestSMTPSession) Rcpt(to string) error {
 }
 
 func (s *TestSMTPSession) Data(r io.Reader) error {
-	b, err := ioutil.ReadAll(r)
+	b, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}
